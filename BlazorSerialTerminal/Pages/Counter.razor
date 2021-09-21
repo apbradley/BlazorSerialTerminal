@@ -2,36 +2,150 @@
 @using System.Collections.ObjectModel
 @using BlazorSerialTerminal.Business
 @using BlazorSerialTerminal.Data
+@using DevExpress.Blazor
 
 @inject SerialService serviceSerial
 @inject ServiceB serviceB
 
-<h2>Counter</h2>
+<h3>Serial Terminal</h3>
 
-<p>Current count: @_currentCount</p>
-<p>Service A count: @_numberA</p>
-<p>Service B count: @_numberB</p>
+<table class="table-sm table-bordered">
+    <tbody>
+        <tr>
+            <td>Serial Service count: @_numberA</td>
+            <td>Service B count: @_numberB</td>
+        </tr>
+    </tbody>
+</table>
 
-<button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+<p> </p>
+@*<p>Current count: @_currentCount</p>
+    <p>Service A count: @_numberA</p>
+    <p>Service B count: @_numberB</p>
+
+    <button class="btn btn-primary" @onclick="IncrementCount">Click me</button>*@
+
+<table class="table-sm table-bordered">
+    <tbody>
+        <tr>
+            <td>
+                <DxComboBox Data="@availablePorts"
+                            @bind-Value="@serviceSerial.PortName"
+                            DropDownVisibleChanged="@((value) => OnDropDownVisibleChanges(value))"
+                            CssClass="cw-240" />
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+<p> </p>
+
+<table class="table-sm table-bordered">
+    <tbody>
+        <tr>
+            <td><button class="btn btn-primary" @onclick="OpenSerialPort" disabled="@(serviceSerial.SerialPortIsOpen())">Open Port</button></td>
+            <td><button class="btn btn-primary" @onclick="CloseSerialPort" disabled="@(!serviceSerial.SerialPortIsOpen())">Close Port</button></td>
+            <td><button class="btn btn-primary" @onclick="ClearData">Clear</button></td>
+        </tr>
+        <tr>
+            <td colspan="3">@serviceSerial.SerialPortError</td>
+        </tr>
+    </tbody>
+</table>
+
+<p> </p>
+
+
+<table class="table-sm table-bordered">
+    <tbody>
+        <tr>
+            <td style="min-width:100px"><button class="btn btn-primary" @onclick="TransmitSerialPortData" disabled="@(!serviceSerial.SerialPortIsOpen())">Transmit</button></td>
+            <td style="width:100%"><input type="text" style="width:100%" @bind="@transmitString" /> </td>
+        </tr>
+    </tbody>
+</table>
+
+<p> </p>
+
+<div>
+    @*class="container"*@
+    <table class="table-sm table-striped table-bordered">
+        @**@
+        <thead>
+            <tr>
+                <th style="min-width:100px">Timestamp</th>
+                <th style="width:16px"></th>
+                <th style="width:100%">Data</th>
+            </tr>
+        </thead>
+        <tbody>
+            @lock (serviceSerial.CollectionLock)
+            {
+                foreach (var asciiString in _dataCollection)
+                {
+                    <tr>
+                        <td>@asciiString.Timestamp.ToString("HH:mm:ss:fff")</td>
+                        <td>: </td>
+                        <td> @asciiString.DataString</td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+
 
 @code {
-    private int _currentCount = 0;
     private int _numberA = 0;
     private int _numberB = 0;
-    private ObservableCollection<ChartItem> _dataCollection;
-    private ObservableCollection<NodeChartData> _devExDataCollection;
+    private ObservableCollection<SerialDataItem> _dataCollection;
     private DateTime startTime = DateTime.Now;
-    private Random random = new Random();
+    private string portsList = "";
+    private IEnumerable<string> availablePorts { get; set; }
+    private string transmitString { get; set; }
 
-    private string AxisMainStroke = "#919191";
-    private string AxisMajorStroke = "#474747";
-    private string AxisMinorStroke = "#919191";
 
-    private void IncrementCount()
+    private void OpenSerialPort()
     {
-        _currentCount++;
-        _numberA = serviceSerial.Counter;
-        _numberB = serviceB.Counter;
+        serviceSerial.OpenSerialPort();
+    }
+
+    private void CloseSerialPort()
+    {
+        serviceSerial.CloseSerialPort();
+    }
+
+    private void GetPortsList()
+    {
+        portsList = "Ports Found: ";
+        foreach (var portName in serviceSerial.GetPortsList())
+        {
+            portsList += $"{portName} | ";
+        };
+    }
+
+    private void ClearData()
+    {
+        lock (serviceSerial.CollectionLock)
+        {
+            serviceSerial.AsciiDataCollection.Clear();
+        }
+    }
+
+    void OnDropDownVisibleChanges(bool value)
+    {
+        if(value)
+        {
+            availablePorts = serviceSerial.GetPortsList();
+            serviceSerial.PortName = availablePorts.FirstOrDefault();
+        }
+    }
+
+    private void TransmitSerialPortData()
+    {
+
+        serviceSerial.SendData(@$"Hello World: {transmitString}");
     }
 
     protected override void OnInitialized()
@@ -41,17 +155,10 @@
         this.serviceSerial.OnValueChanged += ServiceAOnOnValueChanged; ;
         this.serviceB.OnValueChanged += ServiceBOnOnValueChanged; ;
 
-        _dataCollection = serviceSerial.DataPointCollection;
+        _dataCollection = serviceSerial.AsciiDataCollection;
 
-        _devExDataCollection = new ObservableCollection<NodeChartData>();
-
-        // _dataCollection = new ObservableCollection<ChartItem>();
-
-        //for (int i = 0; i < 10; i++)
-        // {
-        //     var pointTime = startTime + TimeSpan.FromMinutes(i);
-        //     _dataCollection.Add(new ChartItem(pointTime.ToString("HH:mm:ss"), (double)random.Next(0, 20)));
-        // }
+        availablePorts = serviceSerial.GetPortsList();
+        serviceSerial.PortName = availablePorts.FirstOrDefault();
 
     }
 
@@ -68,13 +175,11 @@
     private async void ServiceAOnOnValueChanged(int numberA)
     {
         _numberA = numberA;
-        _dataCollection = serviceSerial.DataPointCollection;
-        _devExDataCollection = serviceSerial.DevExCollection;
+        _dataCollection = serviceSerial.AsciiDataCollection;
 
         await InvokeAsync(() =>
         {
             base.StateHasChanged();
         });
     }
-
 }

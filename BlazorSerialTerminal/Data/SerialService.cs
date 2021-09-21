@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using BlazorSerialTerminal.Business;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.IO.Ports;
+using System.Linq;
 
 namespace BlazorSerialTerminal.Data
 {
@@ -16,29 +18,18 @@ namespace BlazorSerialTerminal.Data
         public event ChangeEventHandler OnValueChanged;
 
         public int Counter { get; set; }
+        SerialPort serialPort = null;
 
-        private ObservableCollection<ChartItem> _dataPointCollection;
-        private ObservableCollection<NodeChartData> _devExCollection;
-        private object _infragCollectionLock;
-        //private object _infragCollectionLock;
+        private ObservableCollection<SerialDataItem> _asciiDataCollection;
+        public object CollectionLock;
 
-        public ObservableCollection<ChartItem> DataPointCollection
+        public ObservableCollection<SerialDataItem> AsciiDataCollection
         {
             get
             {
-                lock (_infragCollectionLock)
+                lock (CollectionLock)
                 {
-                    return _dataPointCollection;
-                }
-            }
-        }
-        public ObservableCollection<NodeChartData> DevExCollection
-        {
-            get
-            {
-                lock (_infragCollectionLock)
-                {
-                    return _devExCollection;
+                    return _asciiDataCollection;
                 }
             }
         }
@@ -46,44 +37,109 @@ namespace BlazorSerialTerminal.Data
         private DateTime startTime;
         private Random random = new Random();
 
-        private bool countDirectionDown = true;
-        private const int upperCountLimit = 1000;
-        private const int lowerCountLimit = 0;
-
         public SerialService(ILoggerFactory loggerFactory)
         {
             Logger = loggerFactory.CreateLogger<SerialService>();
             CreateDataCollection();
             Counter = 0;
+
+            PortName = "COM101";
+            serialPort = new SerialPort(PortName);
+
+            serialPort.BaudRate = 19200;
+            serialPort.Parity = System.IO.Ports.Parity.None;
+            serialPort.StopBits = System.IO.Ports.StopBits.One;
+            serialPort.DataBits = 8;
+            serialPort.Handshake = System.IO.Ports.Handshake.None;
+            serialPort.ReadTimeout = 200;
+
+            serialPort.NewLine = "\r";
+
+            SerialPortError = "";
+
         }
+
+        public string PortName { get; set; }
+        public string SerialPortError { get; set; }
 
         private void CreateDataCollection()
         {
-            _infragCollectionLock = new object();
-            _dataPointCollection = new ObservableCollection<ChartItem>();
-            _devExCollection = new ObservableCollection<NodeChartData>();
+            CollectionLock = new object();
+            _asciiDataCollection = new ObservableCollection<SerialDataItem>();
 
-            //for (int i = 0; i < 10; i++)
-            //{
-            //    var pointTime = startTime + TimeSpan.FromDays(i);
-            //    string label = $"{pointTime:yyMMdd}";
-            //    //$"{pointTime.Year}{pointTime.Month:d2}{pointTime.Day:d2}";
-            //    DataPointCollection.Add(new ChartItem(label, random.Next(0, 20)));
-
-            //    //new SixDataValueItem(label, random.Next(0, 20), random.Next(10, 30),
-            //    //    random.Next(20, 40), random.Next(30, 50), random.Next(40, 60), random.Next(0, 50)));
-            //}
         }
+
+        public List<string> GetPortsList()
+        {
+            return SerialPort.GetPortNames().ToList();
+        }
+
+        public void OpenSerialPort()
+        {
+            if (!serialPort.IsOpen)
+            {
+                try
+                {
+                    serialPort.PortName = PortName;
+                    //serialPort.DataReceived += new SerialDataReceivedEventHandler(DataReceivedHandler);
+                    serialPort.Open();
+                    SerialPortError = $"{DateTime.Now:HH:mm:ss}: Port Open";
+                }
+                catch(Exception ex)
+                {
+                    SerialPortError = $"{DateTime.Now:HH:mm:ss}: ERROR-{ex.Message}";
+                }
+            }
+        }
+
+        public void CloseSerialPort()
+        {
+            if (serialPort.IsOpen)
+            {
+                try
+                {
+                    //serialPort.DataReceived -= new SerialDataReceivedEventHandler(DataReceivedHandler);
+                    serialPort.Close();
+                    SerialPortError = $"{DateTime.Now:HH:mm:ss}: Port Closed";
+                }
+                catch (Exception ex)
+                {
+                    SerialPortError = $"{DateTime.Now:HH:mm:ss}: ERROR-{ex.Message}";
+                }
+            }
+        }
+
+        public bool SerialPortIsOpen()
+        {
+            return serialPort.IsOpen;
+        }
+
+        public void SendData(string transmitMessage)
+        {
+            serialPort.WriteLine(transmitMessage);
+        }
+
+        //private void DataReceivedHandler(object sender, SerialDataReceivedEventArgs e)
+        //{
+        //    try
+        //    {
+        //        var serialData = serialPort.ReadLine().ToString();
+
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        string msg = ex.Message;
+        //    }
+        //}
 
         public ILogger Logger { get; }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            const int sampleTime = 500;
-            int totalCount = 0;
-            Logger.LogInformation("ServiceA is starting.");
+            int sampleTime = 100;
+            Logger.LogInformation("SerialService is starting.");
 
-            stoppingToken.Register(() => Logger.LogInformation("ServiceA is stopping."));
+            stoppingToken.Register(() => Logger.LogInformation("SerialService is stopping."));
 
             startTime = DateTime.Now;
 
@@ -93,60 +149,49 @@ namespace BlazorSerialTerminal.Data
                 {
                     //Logger.LogInformation("ServiceA is doing background work. Iterations:{counter}", Counter);
 
-                    if (Counter == lowerCountLimit)
+                    if (serialPort.IsOpen)
                     {
-                        countDirectionDown = false;
-                    }
-                    else if (Counter == upperCountLimit)
-                    {
-                        countDirectionDown = true;
-                    }
+                        var serialData = serialPort.ReadLine();  //blocks until cr received, really need a time out on this
 
-                    if (countDirectionDown == true)
-                        Counter--;
-                    else
+                        var readData = new SerialDataItem(DateTime.Now, serialData);
                         Counter++;
 
-                    totalCount++;
-                    var pointTime = startTime + TimeSpan.FromMilliseconds(totalCount * sampleTime);
-                    string label = $"{pointTime:HH:mm:ss}";
-
-                    lock (_infragCollectionLock)
-                    {
-                        if (_dataPointCollection.Count >= 60)
+                        lock (CollectionLock)
                         {
-                            //remove first record
-                            _dataPointCollection.RemoveAt(0);
+                            if (_asciiDataCollection.Count >= 15)
+                            {
+                                //remove first record
+                                _asciiDataCollection.RemoveAt(0);
+                            }
+
+                            _asciiDataCollection.Add(readData);
                         }
 
-                        var randomValue = random.Next(0, 50);
-
-                        _dataPointCollection.Add(new ChartItem(label, randomValue));
-
-                        if (_devExCollection.Count >= 60)
-                        {
-                            //remove first record
-                            _devExCollection.RemoveAt(0);
-                        }
-
-                        var newData = new ChartItem(label, random.Next(0, 50));
-                        _devExCollection.Add(new NodeChartData(pointTime, randomValue));
+                        //send ui event
+                        OnValueChanged?.Invoke(Counter);
                     }
-
-                    //send ui event
-                    OnValueChanged?.Invoke(Counter);
+                    else
+                    {
+                        serialPort.ReadTimeout = 100;
+                        sampleTime = 5;
+                    }
+                }
+                catch (System.TimeoutException timeoutEx)
+                {
+                    int fred = 2;
+                    //a normal serial port read timeout exception, just continue and dont log
                 }
                 catch (Exception ex)
                 {
-                    int fred = 2;
-                    Logger.LogInformation($"ServiceA exception: {ex.Message}");
+                    Logger.LogInformation($"SerialService exception: {ex.Message}");
                 }
 
                 await Task.Delay(TimeSpan.FromMilliseconds(sampleTime), stoppingToken);
 
             }
 
-            Logger.LogInformation("ServiceA has stopped.");
+            Logger.LogInformation("SerialService has stopped.");
         }
     }
+
 }

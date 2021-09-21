@@ -1,0 +1,80 @@
+﻿@page "/counter"
+@using System.Collections.ObjectModel
+@using BlazorSerialTerminal.Business
+@using BlazorSerialTerminal.Data
+
+@inject SerialService serviceSerial
+@inject ServiceB serviceB
+
+<h2>Counter</h2>
+
+<p>Current count: @_currentCount</p>
+<p>Service A count: @_numberA</p>
+<p>Service B count: @_numberB</p>
+
+<button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+
+@code {
+    private int _currentCount = 0;
+    private int _numberA = 0;
+    private int _numberB = 0;
+    private ObservableCollection<ChartItem> _dataCollection;
+    private ObservableCollection<NodeChartData> _devExDataCollection;
+    private DateTime startTime = DateTime.Now;
+    private Random random = new Random();
+
+    private string AxisMainStroke = "#919191";
+    private string AxisMajorStroke = "#474747";
+    private string AxisMinorStroke = "#919191";
+
+    private void IncrementCount()
+    {
+        _currentCount++;
+        _numberA = serviceSerial.Counter;
+        _numberB = serviceB.Counter;
+    }
+
+    protected override void OnInitialized()
+    {
+
+        // Subscription to table record change events
+        this.serviceSerial.OnValueChanged += ServiceAOnOnValueChanged; ;
+        this.serviceB.OnValueChanged += ServiceBOnOnValueChanged; ;
+
+        _dataCollection = serviceSerial.DataPointCollection;
+
+        _devExDataCollection = new ObservableCollection<NodeChartData>();
+
+        // _dataCollection = new ObservableCollection<ChartItem>();
+
+        //for (int i = 0; i < 10; i++)
+        // {
+        //     var pointTime = startTime + TimeSpan.FromMinutes(i);
+        //     _dataCollection.Add(new ChartItem(pointTime.ToString("HH:mm:ss"), (double)random.Next(0, 20)));
+        // }
+
+    }
+
+    private async void ServiceBOnOnValueChanged(int numberB)
+    {
+        _numberB = numberB;
+
+        await InvokeAsync(() =>
+        {
+            base.StateHasChanged();
+        });
+    }
+
+    private async void ServiceAOnOnValueChanged(int numberA)
+    {
+        _numberA = numberA;
+        _dataCollection = serviceSerial.DataPointCollection;
+        _devExDataCollection = serviceSerial.DevExCollection;
+
+        await InvokeAsync(() =>
+        {
+            base.StateHasChanged();
+        });
+    }
+
+}
